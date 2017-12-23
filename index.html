@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Bir Laravel İsteğinin Yaşam Döngüsü</title>
+
+    <link href="vendor/reveal/css/reveal.css" rel="stylesheet" />
+    <link href="vendor/reveal/css/theme/night.css" rel="stylesheet" />
+    <link href="vendor/highlight/styles/agate.css" rel="stylesheet" />
+</head>
+<body>
+
+<div class="reveal">
+    <div class="slides">
+        <section>
+            <h2>Bir Laravel İsteğinin Yaşam Döngüsü</h2>
+        </section>
+        <section>
+            <h3>1. İsteğin Gelmesi</h3>
+
+            <p>Kullanıcının tarayıcı ile web sayfasını ziyaret etmesiyle (CLI ile çalıştırılmasını saymazsak) ilk olarak
+                <b>Web Sunucusu</b> yazılımı gelen isteği <i>public/index.php</i> dosyasına gönderecektir.</p>
+            <pre><code data-trim data-noescape>
+                Webserver -> Request -> public/index.php
+            </code></pre>
+        </section>
+        <section>
+            <h3>2. Otomatik Yükleme</h3>
+
+            <p>Diğer yapılardan da aşina olduğumuz gibi <b>Composer</b> tarafından oluşturulan <b>Autoloader</b> çağrılacaktır.</p>
+
+            <pre><code class="php" data-trim data-noescape>
+                // public/index.php
+                require __DIR__.'/../vendor/autoload.php';
+            </code></pre>
+        </section>
+        <section>
+            <h3>3. Laravel Uygulama Nesnesinin Alınması</h3>
+
+            <p>Laravel tarafından uygulamanın nesnesi(Container) oluşturulacaktır.</p>
+
+            <pre><code class="php" data-trim data-noescape>
+                // public/index.php
+                $app = require_once __DIR__.'/../bootstrap/app.php';
+            </code></pre>
+
+            <pre><code class="php" data-trim data-noescape>
+                // bootstrap/app.php
+                $app = new Illuminate\Foundation\Application(
+                    realpath(__DIR__.'/../')
+                );
+
+                // ...
+
+                return $app;
+            </code></pre>
+        </section>
+        <section>
+            <section>
+                <h3>Laravel Uygulama Nesnesi Nasıl Oluşturuluyor?</h3>
+
+                <p>Laravel'de uygulamalar <b>Illuminate\Foundation\Application</b> sınıfını baz alarak veya direk o sınıfı kullanarak oluşturulmaktadır.</p>
+
+                <p>Peki bu sınıfta neler var?</p>
+            </section>
+            <section>
+                <h3>Application</h3>
+
+                <ul>
+                    <li>Uygulamanın Bulunduğu Paket - Namespace</li>
+                    <li>Ana Dizin - Base Path</li>
+                    <li>Dizinler ve Dosyalar - Database Path, Storage Path, ENV Path, ENV File</li>
+                    <li>Ön Yüklemenin Yapılıp Yapılmadığı - Has Been Bootstrapped?</li>
+                    <li>Yüklemenin Yapılıp Yapılmadığı - Is Booted?</li>
+                </ul>
+            </section>
+            <section>
+                <ul>
+                    <li>Ön Yükleme, Yükleme, Sonlanma, Loglama işlemleri yapılırken/yapıldıktan sonra çalıştırılacak işlem listesi</li>
+                    <li>Kayıtlı Servisler - Registered Service Providers</li>
+                    <li>Yüklenen Servisler - Loaded Service Providers</li>
+                    <li>Ertelenmiş Servisler - Deferred Services</li>
+                </ul>
+            </section>
+            <section>
+                <h3>Application Başlatılıyor...</h3>
+
+                <p>Öncelikle, kullanıcı uygulamayı başlatırken eğer bir ana dizin belirttiyse bu kayıt ediliyor.</p>
+
+                <pre><code class="php" data-trim data-noescape>
+                // (vendor) Illuminate/Foundation/Application.php
+                if ($basePath) {
+                    $this->setBasePath($basePath);
+                }
+                </code></pre>
+            </section>
+            <section>
+                <p>Sadece ana dizin mi? Hayır, ana dizinle birlikte Storage, Config, Lang gibi dizinler de kayıt ediliyor</p>
+
+                <pre><code class="php" data-trim data-noescape>
+                    // (vendor) Illuminate/Foundation/Application.php
+                    $this->instance('path', $this->path());
+                    $this->instance('path.base', $this->basePath());
+                    $this->instance('path.lang', $this->langPath());
+                    $this->instance('path.config', $this->configPath());
+                    $this->instance('path.public', $this->publicPath());
+                    $this->instance('path.storage', $this->storagePath());
+                    $this->instance('path.database', $this->databasePath());
+                    $this->instance('path.resources', $this->resourcePath());
+                    $this->instance('path.bootstrap', $this->bootstrapPath());
+                </code></pre>
+            </section>
+            <section>
+                <h3>Instance???</h3>
+
+                <p>Buradaki amaç, container içerisine zaten oluşturulmuş nesnelerin dahil edilmesidir.</p>
+            </section>
+            <section>
+                <p>Burada 'path' üzerinden örnek vermek gerekirse, öncelikle verilen 'path' ismi üzerinde aşağıdaki kontroller uygulanır.</p>
+
+                <ul style="font-size: 60%;">
+                    <li>'path' isminde bir <b>bağlama(binding)</b> varsa tekrar bağlama işlemi yapıldığı not edilir.</li>
+                    <li>'path' isminde bir <b>nesne(instance)</b> varsa tekrar bağlama işlemi yapıldığı not edilir.</li>
+                    <li>'path' isminde bir <b>takma ad(alias)</b> varsa tekrar bağlama işlemi yapıldığı not edilir.</li>
+                    <li>'path' isminde bir <b>takma ad(alias)</b> varsa silinir.</li>
+                    <li>'path' ismindeki nesne containera dahil edilir.</li>
+                    <li>Tekrar bağlama işlemi <b>yapıldıysa</b> nesne üzerindeki <b>rebound</b> metotları çalıştırılır. (callback)</li>
+                    <li>nesne sahibine geri verilir :)</li>
+                </ul>
+            </section>
+            <section>
+                <p>Uygulamanın oluşturulmasına geri dönelim.</p>
+
+                <p>İkinci aşamada temel bağlama işlemleri yapılacaktır.</p>
+
+                <p>Singleton yapısı oluşturulur.</p>
+
+                <pre><code class="php" data-trim data-noescape>
+                    // (vendor) Illuminate/Foundation/Application.php
+                    static::setInstance($this);
+                </code></pre>
+
+                <pre><code class="php" data-trim data-noescape>
+                    // (vendor) Illuminate/Container/Container.php
+                    public static function setInstance(ContainerContract $container = null)
+                    {
+                        return static::$instance = $container;
+                    }
+                </code></pre>
+            </section>
+            <section>
+                <p>'app' ismindeki instance(yukarıda bahsettiğimiz olay) oluşturulur.</p>
+
+                <pre><code class="php" data-trim data-noescape>
+                    // (vendor) Illuminate/Foundation/Application.php
+                    $this->instance('app', $this);
+                </code></pre>
+
+                <p>'Container sınıfı' instance(yukarıda bahsettiğimiz) oluşturulur.</p>
+
+                <pre><code class="php" data-trim data-noescape>
+                    // (vendor) Illuminate/Foundation/Application.php
+                    $this->instance(Container::class, $this);
+                </code></pre>
+
+                <p>'Package Manifest sınıfı' instance(yukarıda bahsettiğimiz) oluşturulur.</p>
+
+                <pre><code class="php" data-trim data-noescape>
+                    $this->instance(PackageManifest::class, new PackageManifest(
+                        new Filesystem, $this->basePath(), $this->getCachedPackagesPath()
+                    ));
+                </code></pre>
+            </section>
+            <section>
+                <h3>Package Manifest???</h3>
+
+                <p>Manifest dosyaları, bir grup dosyaların meta verilerini kayıt altında tutan dosyalardır.</p>
+
+                <p>Daha sonra tekrar üzerinde konuşacağız...</p>
+            </section>
+            <section>
+                <h3>Temel Servislerin Kayıt Edilmesi</h3>
+
+                <p>Laravel içerisinde temel olarak kayıt edilen 3 servis bulunmaktadır.</p>
+
+                <ul>
+                    <li>Event Service</li>
+                    <li>Log Service</li>
+                    <li>Routing Service / Route Service</li>
+                </ul>
+
+                <pre><code class="php" data-trim data-noescape>
+                    // (vendor) Illuminate/Foundation/Application.php
+
+                    $this->register(new EventServiceProvider($this));
+                    $this->register(new LogServiceProvider($this));
+                    $this->register(new RoutingServiceProvider($this));
+                </code></pre>
+            </section>
+            <section>
+                <h3>Temel Container Takma İsimleri</h3>
+
+                <pre><code class="php" data-trim data-noescape>
+                    foreach ([
+            'app'                  => [\Illuminate\Foundation\Application::class, \Illuminate\Contracts\Container\Container::class, \Illuminate\Contracts\Foundation\Application::class,  \Psr\Container\ContainerInterface::class],
+            'auth'                 => [\Illuminate\Auth\AuthManager::class, \Illuminate\Contracts\Auth\Factory::class],
+            'auth.driver'          => [\Illuminate\Contracts\Auth\Guard::class],
+            'blade.compiler'       => [\Illuminate\View\Compilers\BladeCompiler::class],
+            'cache'                => [\Illuminate\Cache\CacheManager::class, \Illuminate\Contracts\Cache\Factory::class],
+            'cache.store'          => [\Illuminate\Cache\Repository::class, \Illuminate\Contracts\Cache\Repository::class],
+            'config'               => [\Illuminate\Config\Repository::class, \Illuminate\Contracts\Config\Repository::class],
+            'cookie'               => [\Illuminate\Cookie\CookieJar::class, \Illuminate\Contracts\Cookie\Factory::class, \Illuminate\Contracts\Cookie\QueueingFactory::class],
+            'encrypter'            => [\Illuminate\Encryption\Encrypter::class, \Illuminate\Contracts\Encryption\Encrypter::class],
+            'db'                   => [\Illuminate\Database\DatabaseManager::class],
+            'db.connection'        => [\Illuminate\Database\Connection::class, \Illuminate\Database\ConnectionInterface::class],
+            'events'               => [\Illuminate\Events\Dispatcher::class, \Illuminate\Contracts\Events\Dispatcher::class],
+            'files'                => [\Illuminate\Filesystem\Filesystem::class],
+            'filesystem'           => [\Illuminate\Filesystem\FilesystemManager::class, \Illuminate\Contracts\Filesystem\Factory::class],
+            'filesystem.disk'      => [\Illuminate\Contracts\Filesystem\Filesystem::class],
+            'filesystem.cloud'     => [\Illuminate\Contracts\Filesystem\Cloud::class],
+            'hash'                 => [\Illuminate\Contracts\Hashing\Hasher::class],
+            'translator'           => [\Illuminate\Translation\Translator::class, \Illuminate\Contracts\Translation\Translator::class],
+            'log'                  => [\Illuminate\Log\Writer::class, \Illuminate\Contracts\Logging\Log::class, \Psr\Log\LoggerInterface::class],
+            'mailer'               => [\Illuminate\Mail\Mailer::class, \Illuminate\Contracts\Mail\Mailer::class, \Illuminate\Contracts\Mail\MailQueue::class],
+            'auth.password'        => [\Illuminate\Auth\Passwords\PasswordBrokerManager::class, \Illuminate\Contracts\Auth\PasswordBrokerFactory::class],
+            'auth.password.broker' => [\Illuminate\Auth\Passwords\PasswordBroker::class, \Illuminate\Contracts\Auth\PasswordBroker::class],
+            'queue'                => [\Illuminate\Queue\QueueManager::class, \Illuminate\Contracts\Queue\Factory::class, \Illuminate\Contracts\Queue\Monitor::class],
+            'queue.connection'     => [\Illuminate\Contracts\Queue\Queue::class],
+            'queue.failer'         => [\Illuminate\Queue\Failed\FailedJobProviderInterface::class],
+            'redirect'             => [\Illuminate\Routing\Redirector::class],
+            'redis'                => [\Illuminate\Redis\RedisManager::class, \Illuminate\Contracts\Redis\Factory::class],
+            'request'              => [\Illuminate\Http\Request::class, \Symfony\Component\HttpFoundation\Request::class],
+            'router'               => [\Illuminate\Routing\Router::class, \Illuminate\Contracts\Routing\Registrar::class, \Illuminate\Contracts\Routing\BindingRegistrar::class],
+            'session'              => [\Illuminate\Session\SessionManager::class],
+            'session.store'        => [\Illuminate\Session\Store::class, \Illuminate\Contracts\Session\Session::class],
+            'url'                  => [\Illuminate\Routing\UrlGenerator::class, \Illuminate\Contracts\Routing\UrlGenerator::class],
+            'validator'            => [\Illuminate\Validation\Factory::class, \Illuminate\Contracts\Validation\Factory::class],
+            'view'                 => [\Illuminate\View\Factory::class, \Illuminate\Contracts\View\Factory::class],
+        ] as $key => $aliases) {
+            foreach ($aliases as $alias) {
+                $this->alias($key, $alias);
+            }
+        }
+                </code></pre>
+            </section>
+            <section>
+                <h3>Sonunda Application oluşturuldu!</h3>
+
+                <p>Bitti mi? Hayır, daha yeni başladık :)</p>
+            </section>
+            <section>
+                <p style="font-size: 80%;">Application nesnesini döndüren dosyamıza geri dönelim :)</p>
+
+                <pre><code class="php" data-trim>
+                    // bootstrap/app.php
+
+                    // application nesnesi oluşturuldu
+                    $app = new Illuminate\Foundation\Application(
+                        realpath(__DIR__.'/../')
+                    );
+
+                    // birkaç işlem yapmadan app'ı bırakmayız demiş :)
+                    $app->singleton(
+                        Illuminate\Contracts\Http\Kernel::class,
+                        App\Http\Kernel::class
+                    );
+
+                    $app->singleton(
+                        Illuminate\Contracts\Console\Kernel::class,
+                        App\Console\Kernel::class
+                    );
+
+                    $app->singleton(
+                        Illuminate\Contracts\Debug\ExceptionHandler::class,
+                        App\Exceptions\Handler::class
+                    );
+                </code></pre>
+            </section>
+            <section>
+                <h3>Temel Arayüzler</h3>
+
+                <p>Application nesnemizi vermeden önce temel arayüzlerimizi container içerisine almamız gerekiyor, bunlar</p>
+
+                <ul>
+                    <li>Http Kernel</li>
+                    <li>Console Kernel</li>
+                    <li>Exception Handler</li>
+                </ul>
+
+                <p>Burada temel olarak verilen arayüz 5-6 slayt önce belirttiğimiz 'bind' işlemine tabi tutulmakta.</p>
+            </section>
+            <section>
+                <h3>Alalım Artık Şu App'ı</h3>
+
+                <p>Application nesnesi (O artık bi Container) iyice hazırlandıktan sonra başladığımız noktaya index.php'ye dönüyoruz :)</p>
+            </section>
+        </section>
+        <section>
+            <h3>4. Kernel'in Oluşturulması</h3>
+
+            <p>Kullanacağı Kernel'i belirtmiştik, e artık söyleyelim de bizim için Container içerisindeki Kernel'i oluştursun</p>
+            <pre><code class="php" data-trim>
+                // public/index.php
+                $kernel = $app->make(Illuminate\Contracts\Http\Kernel::class);
+            </code></pre>
+        </section>
+        <section>
+            <section>
+            <h3>Kernel Nasıl Oluştu?</h3>
+
+            <p>Biz en son container içerisindeki yapıları isimlerle beraber tutmuştuk ama oluşturmamıştık. Nasıl oluştu ki o?</p>
+            </section>
+            <section>
+                <p>Parametresi olmayacak şekilde benden Kernel istendi. Hemen bunun gerçek takma adı neymiş öğreneyim ve benden istediği eğer ertelenmiş bir servis ise ertelenmiş servis olarak yükleyeyim onu. En son da Container'a vereyim o nasıl yüklerse yüklesin.</p>
+            <pre><code class="php" data-trim>
+                // (vendor) Illuminate/Foundation/Application.php
+                public function make($abstract, array $parameters = [])
+                {
+                    $abstract = $this->getAlias($abstract);
+
+                    if (isset($this->deferredServices[$abstract]) && ! isset($this->instances[$abstract])) {
+                        $this->loadDeferredProvider($abstract);
+                    }
+
+                    return parent::make($abstract, $parameters); // --> Illuminate/Container/Container.php
+                }
+            </code></pre>
+            </section>
+            <section>
+                <p>Application tüm işi bana yıktı, bakayım bu <b>Kernel</b> neyin nesiymiş...</p>
+            <pre><code class="php" data-trim>
+                // (vendor) Illuminate/Container/Container.php
+                public function make($abstract, array $parameters = [])
+                {
+                    return $this->resolve($abstract, $parameters);
+                }
+            </code></pre>
+            </section>
+
+            <section>
+                <pre><code class="php" data-trim>
+    // (vendor) Illuminate/Container/Container.php
+    protected function resolve($abstract, $parameters = [])
+    {
+        $abstract = $this->getAlias($abstract);
+
+        $needsContextualBuild = ! empty($parameters) || ! is_null(
+            $this->getContextualConcrete($abstract)
+        );
+
+        // If an instance of the type is currently being managed as a singleton we'll
+        // just return an existing instance instead of instantiating new instances
+        // so the developer can keep using the same objects instance every time.
+        if (isset($this->instances[$abstract]) && ! $needsContextualBuild) {
+            return $this->instances[$abstract];
+        }
+
+        $this->with[] = $parameters;
+
+        $concrete = $this->getConcrete($abstract);
+
+        // We're ready to instantiate an instance of the concrete type registered for
+        // the binding. This will instantiate the types, as well as resolve any of
+        // its "nested" dependencies recursively until all have gotten resolved.
+        if ($this->isBuildable($concrete, $abstract)) {
+            $object = $this->build($concrete);
+        } else {
+            $object = $this->make($concrete);
+        }
+
+        // If we defined any extenders for this type, we'll need to spin through them
+        // and apply them to the object being built. This allows for the extension
+        // of services, such as changing configuration or decorating the object.
+        foreach ($this->getExtenders($abstract) as $extender) {
+            $object = $extender($object, $this);
+        }
+
+        // If the requested type is registered as a singleton we'll want to cache off
+        // the instances in "memory" so we can return it later without creating an
+        // entirely new instance of an object on each subsequent request for it.
+        if ($this->isShared($abstract) && ! $needsContextualBuild) {
+            $this->instances[$abstract] = $object;
+        }
+
+        $this->fireResolvingCallbacks($abstract, $object);
+
+        // Before returning, we will also set the resolved flag to "true" and pop off
+        // the parameter overrides for this build. After those two things are done
+        // we will be ready to return back the fully constructed class instance.
+        $this->resolved[$abstract] = true;
+
+        array_pop($this->with);
+
+        return $object;
+    }
+            </code></pre>
+            </section>
+
+            <section>
+                <p>İç İçe gelişmiş bir oluşturma gerekiyorsa onları önce halledeyim. Kernel'de gerek yokmuş peki o zaman.</p>
+
+                <pre><code class="php" data-trim>
+                    $needsContextualBuild = ! empty($parameters) || ! is_null(
+                      $this->getContextualConcrete($abstract)
+                    );
+                </code></pre>
+            </section>
+            <section>
+                <p>Singleton bir nesne mi bakayım... Hımm singleton da değil</p>
+
+                <pre><code class="php" data-trim>
+                    if (isset($this->instances[$abstract]) && ! $needsContextualBuild) {
+                        return $this->instances[$abstract];
+                    }
+                </code></pre>
+            </section>
+            <section>
+                <p>İstediği nesneyi getConcrete(Daha önceden singleton diyerek bootstrap.php'de belirtmiştik) ile alayım.</p>
+
+                <pre><code class="php" data-trim>
+                    $concrete = $this->getConcrete($abstract);
+                </code></pre>
+
+            </section>
+            <section>
+                <p>Peki bu nesne build edilecek mi? Hmm Closure olduğuna göre build edilecek...</p>
+
+                <pre><code class="php" data-trim>
+                if ($this->isBuildable($concrete, $abstract)) {
+                    $object = $this->build($concrete);
+                } else {
+                    $object = $this->make($concrete);
+                }
+                </code></pre>
+            </section>
+            <section>
+                <p>Closure olduğu için direk nesnenin kendisini çağırıyorum</p>
+
+                <pre><code class="php" data-trim>
+                    if ($concrete instanceof Closure) {
+                        return $concrete($this, $this->getLastParameterOverride());
+                    }
+                </code></pre>
+            </section>
+            <section>
+                <p>Bu nesneyi çözdüğümü nesnenin kendisine söyleyeyim ayrıca bende de yapılacak işlemler varsa yapılsın (callback)</p>
+
+                <pre><code class="php" data-trim>
+                    $this->fireResolvingCallbacks($abstract, $object);
+                </code></pre>
+            </section>
+            <section>
+                <p>Kernel'in çözüldüğünü bir not edeyim...</p>
+
+                <pre><code class="php" data-trim>
+                    $this->resolved[$abstract] = true;
+                </code></pre>
+            </section>
+            <section>
+                <p>Artık oluşturduğum sınıf nesnesini vereyim, çok beklettik insanları...</p>
+
+                <pre><code class="php" data-trim>
+                    return $object;
+                </code></pre>
+            </section>
+        </section>
+        <section>
+            <section>
+                <h3>5. Cevabın Oluşması</h3>
+
+                <p>Kernel'e request bilgilerine ileteyim bana da cevabı söylesin.</p>
+
+                <pre><code class="php" data-trim>
+                $response = $kernel->handle(
+                    $request = Illuminate\Http\Request::capture()
+                );
+            </code></pre>
+            </section>
+            <section>
+                <p>İstek geldi, Web olduğu için _method ile metotların belirtilmesine izin vereyim.</p>
+
+                <pre><code class="php" data-trim>
+                    // (vendor) Illuminate/Foundation/Http/Kernel.php
+                    $request->enableHttpMethodParameterOverride();
+                </code></pre>
+
+                <pre><code class="php" data-trim>
+                    // (vendor) Symfony/Component/HttpFoundation/Request.php
+                    self::$httpMethodParameterOverride = true;
+                </code></pre>
+            </section>
+            <section>
+                <p>Sonucu bulmak için isteği rotadan geçir</p>
+
+                <pre><code class="php" data-trim>
+                    // (vendor) Illuminate/Foundation/Http/Kernel.php
+                    $response = $this->sendRequestThroughRouter($request);
+                </code></pre>
+
+                <pre><code class="php" data-trim>
+                    // (vendor) Illuminate/Foundation/Http/Kernel.php
+                    $this->app->instance('request', $request);
+
+                    Facade::clearResolvedInstance('request');
+
+                    $this->bootstrap();
+
+                    return (new Pipeline($this->app))
+                        ->send($request)
+                        ->through($this->app->shouldSkipMiddleware() ? [] : $this->middleware)
+                        ->then($this->dispatchToRouter());
+                </code></pre>
+            </section>
+            <section>
+                <p>Başlatma işlemlerini yap...</p>
+
+                <ul>
+                    <li>ENV Yüklemesi Yap</li>
+                    <li>Config Yüklemesi Yap</li>
+                    <li>Hatalarda Ne Yapılacağını Al</li>
+                    <li>Facade leri Yükle</li>
+                    <li>Servisleri Yükle</li>
+                    <li>Ön Yüklemeleri Al</li>
+                </ul>
+
+                <pre><code class="php" data-trim>
+                    $this->bootstrap();
+                </code></pre>
+
+                <pre><code class="php" data-trim>
+                    protected $bootstrappers = [
+                        \Illuminate\Foundation\Bootstrap\LoadEnvironmentVariables::class,
+                        \Illuminate\Foundation\Bootstrap\LoadConfiguration::class,
+                        \Illuminate\Foundation\Bootstrap\HandleExceptions::class,
+                        \Illuminate\Foundation\Bootstrap\RegisterFacades::class,
+                        \Illuminate\Foundation\Bootstrap\RegisterProviders::class,
+                        \Illuminate\Foundation\Bootstrap\BootProviders::class,
+                    ];
+                </code></pre>
+            </section>
+            <section>
+                <p>Middleware'leri kontrol etmek için işlem zincirinden geçir (Pipeline) hepsinden geçerse rotaya gitsin</p>
+
+                <pre><code class="php" data-trim>
+                    return (new Pipeline($this->app))
+                        ->send($request)
+                        ->through($this->app->shouldSkipMiddleware() ? [] : $this->middleware)
+                        ->then($this->dispatchToRouter());
+                </code></pre>
+            </section>
+            <section>
+                <p>Rotayı Bul....</p>
+
+                <p>Rotayı Bulmak için Rotayı Oluştur...</p>
+
+                <pre><code class="php" data-trim>
+                    // (vendor) Illuminate/Routing/Router.php
+                    protected function findRoute($request)
+                    {
+                        $this->current = $route = $this->routes->match($request);
+
+                        $this->container->instance(Route::class, $route);
+
+                        return $route;
+                    }
+                </code></pre>
+            </section>
+            <section>
+                <p>Bulduğun Rotayı Çalıştır ve sonucu hazırla</p>
+
+                <pre><code class="php" data-trim>
+                    // (vendor) Illuminate/Routing/Router.php
+                    return $this->prepareResponse($request,
+                        $this->runRouteWithinStack($route, $request)
+                    );
+                </code></pre>
+            </section>
+            <section>
+                <p>Rotayı Çalıştırmadan önce Rotanın Middleware'lerini Pipeline üzerinde teker teker kontrol et ve ordan sağ çıkarsa :) çalıştır</p>
+
+                <pre><code class="php" data-trim>
+                    protected function runRouteWithinStack(Route $route, Request $request)
+                    {
+                        $shouldSkipMiddleware = $this->container->bound('middleware.disable') &&
+                                $this->container->make('middleware.disable') === true;
+
+                        $middleware = $shouldSkipMiddleware ? [] : $this->gatherRouteMiddleware($route);
+
+                        return (new Pipeline($this->container))
+                            ->send($request)
+                            ->through($middleware)
+                            ->then(function ($request) use ($route) {
+                                return $this->prepareResponse(
+                                    $request, $route->run()
+                                );
+                        });
+                    }
+                </code></pre>
+            </section>
+            <section>
+                <p>Sonucunda nasıl bir çıktı vereceğini belirleyelim...</p>
+
+                <pre><code class="php" data-trim>
+    // (vendor) Illuminate/Routing/Router.php
+    public static function toResponse($request, $response)
+    {
+        if ($response instanceof Responsable) {
+            $response = $response->toResponse($request);
+        }
+
+        if ($response instanceof PsrResponseInterface) {
+            $response = (new HttpFoundationFactory)->createResponse($response);
+        } elseif (! $response instanceof SymfonyResponse &&
+                   ($response instanceof Arrayable ||
+                    $response instanceof Jsonable ||
+                    $response instanceof ArrayObject ||
+                    $response instanceof JsonSerializable ||
+                    is_array($response))) {
+            $response = new JsonResponse($response);
+        } elseif (! $response instanceof SymfonyResponse) {
+            $response = new Response($response);
+        }
+
+        if ($response->getStatusCode() === Response::HTTP_NOT_MODIFIED) {
+            $response->setNotModified();
+        }
+
+        return $response->prepare($request);
+    }
+                </code></pre>
+            </section>
+            <section>
+                <pre><code class="php" data-trim>
+    // (vendor) Symfony/Component/HttpFoundation/Response.php
+    public function prepare(Request $request)
+    {
+        $headers = $this->headers;
+
+        if ($this->isInformational() || $this->isEmpty()) {
+            $this->setContent(null);
+            $headers->remove('Content-Type');
+            $headers->remove('Content-Length');
+        } else {
+            // Content-type based on the Request
+            if (!$headers->has('Content-Type')) {
+                $format = $request->getRequestFormat();
+                if (null !== $format && $mimeType = $request->getMimeType($format)) {
+                    $headers->set('Content-Type', $mimeType);
+                }
+            }
+
+            // Fix Content-Type
+            $charset = $this->charset ?: 'UTF-8';
+            if (!$headers->has('Content-Type')) {
+                $headers->set('Content-Type', 'text/html; charset='.$charset);
+            } elseif (0 === stripos($headers->get('Content-Type'), 'text/') && false === stripos($headers->get('Content-Type'), 'charset')) {
+                // add the charset
+                $headers->set('Content-Type', $headers->get('Content-Type').'; charset='.$charset);
+            }
+
+            // Fix Content-Length
+            if ($headers->has('Transfer-Encoding')) {
+                $headers->remove('Content-Length');
+            }
+
+            if ($request->isMethod('HEAD')) {
+                // cf. RFC2616 14.13
+                $length = $headers->get('Content-Length');
+                $this->setContent(null);
+                if ($length) {
+                    $headers->set('Content-Length', $length);
+                }
+            }
+        }
+
+        // Fix protocol
+        if ('HTTP/1.0' != $request->server->get('SERVER_PROTOCOL')) {
+            $this->setProtocolVersion('1.1');
+        }
+
+        // Check if we need to send extra expire info headers
+        if ('1.0' == $this->getProtocolVersion() && false !== strpos($this->headers->get('Cache-Control'), 'no-cache')) {
+            $this->headers->set('pragma', 'no-cache');
+            $this->headers->set('expires', -1);
+        }
+
+        $this->ensureIEOverSSLCompatibility($request);
+
+        return $this;
+    }
+                </code></pre>
+            </section>
+        </section>
+        <section>
+            <h3>Sonucu(Response) Gönderelim</h3>
+
+            <pre><code class="php" data-trim>
+                // public/index.php
+                $response->send();
+            </code></pre>
+
+            <pre><code class="php" data-trim>
+    // Symfony/Component/HttpFoundation/Response.php
+    public function send()
+    {
+        $this->sendHeaders();
+        $this->sendContent();
+
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        } elseif ('cli' !== PHP_SAPI) {
+            static::closeOutputBuffers(0, true);
+        }
+
+        return $this;
+    }
+            </code></pre>
+        </section>
+        <section>
+            <h3>6. Kapanış</h3>
+
+            <p>Kernel'e işimizi bitirdiğimizi söyleyelim o da bulunduğu App container'ını bitirsin doğal olarak o da kendisinde kayıtlı(alt containerlardan gelen) yapılacak işlemleri çalıştırsın.</p>
+
+            <pre><code class="php" data-trim>
+                // public/index.php
+                $kernel->terminate($request, $response);
+            </code></pre>
+        </section>
+        <section>
+            <blockquote>Bir Laravel İsteğinin Yaşam Döngüsü</blockquote>
+
+            <p><a style="color: inherit;" href="https://erayaydin.github.io">Eray Aydın</a></p>
+            <a href="https://github.com/erayaydin"><i class="fa fa-github"></i></a>
+        </section>
+    </div>
+</div>
+
+<script src="vendor/reveal/lib/js/head.min.js"></script>
+<script src="vendor/reveal/js/reveal.js"></script>
+<script>
+    Reveal.initialize({
+        dependencies: [
+            // Cross-browser shim that fully implements classList - https://github.com/eligrey/classList.js/
+            { src: 'vendor/reveal/lib/js/classList.js', condition: function() { return !document.body.classList; } },
+
+            // Interpret Markdown in <section> elements
+            { src: 'vendor/reveal/plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+            { src: 'vendor/reveal/plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+
+            // Syntax highlight for <code> elements
+            { src: 'vendor/reveal/plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+
+            // Zoom in and out with Alt+click
+            { src: 'vendor/reveal/plugin/zoom-js/zoom.js', async: true },
+
+            // Speaker notes
+            { src: 'vendor/reveal/plugin/notes/notes.js', async: true }
+        ]
+    });
+</script>
+
+</body>
+</html>
